@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tests"))
 from fakes.fakecluster import FakeCluster  # noqa: E402
 
-CTX = "prod-west1"
+CTX = "my-context"
 
 APP = {
     "apiVersion": "argoproj.io/v1alpha1",

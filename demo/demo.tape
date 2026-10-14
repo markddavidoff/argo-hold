@@ -28,13 +28,13 @@ Type "# argo-hold runs against a FAKE cluster here. No real cluster is touched."
 Sleep 2s
 
 Type "# 1. Dry-run: see exactly what the hold would change." Enter
-Type "argo-hold start --app web --context prod-west1 \\" Enter
+Type "argo-hold start --app web --context my-context \\" Enter
 Type "  --target deployment/web -n web --type merge \\" Enter
 Type "  --patch '{\"spec\":{\"replicas\":3}}' --dry-run" Enter
 Sleep 3s
 
 Type "# 2. Start the hold in the background (auto-sync goes off; the change stays)." Enter
-Type "argo-hold start --app web --context prod-west1 \\" Enter
+Type "argo-hold start --app web --context my-context \\" Enter
 Type "  --target deployment/web -n web --type merge \\" Enter
 Type "  --patch '{\"spec\":{\"replicas\":3}}' --detach --yes --interval 2" Enter
 Sleep 3s

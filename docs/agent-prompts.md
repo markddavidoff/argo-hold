@@ -43,7 +43,7 @@ Stop where the steps say to stop.
 
 ## Values
 Wherever a command or step below shows <NAME>, use the value of NAME from this list.
-CONTEXT = prod-west1
+CONTEXT = my-context
 APP = otel-collector
 TARGET = daemonset/otel-collector-logs
 NS = monitoring

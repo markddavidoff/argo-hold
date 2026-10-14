@@ -285,7 +285,7 @@ The command to run against a live cluster:
 
 ```bash
 argo-hold start --app otel-collector \
-  --context prod-west1 \
+  --context my-context \
   --target daemonset/otel-collector-logs -n monitoring --type strategic \
   --patch '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"gke-nodepool","operator":"NotIn","values":["infra-pool"]}]}]}}}}}}}' \
   --dry-run          # then drop --dry-run, add --detach, confirm at the prompt

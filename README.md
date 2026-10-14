@@ -63,12 +63,12 @@ in the cluster (namespace `argo-cd` by default; pass `--argocd-namespace` for a 
 
 ```bash
 # 1. Plan only. Prints the context, app, touched paths, and release behavior; changes nothing.
-argo-hold start --app web --context prod-west1 \
+argo-hold start --app web --context my-context \
   --target deployment/web -n web --type merge \
   --patch '{"spec":{"replicas":3}}' --dry-run
 
 # 2. Run it for real. Confirm at the prompt; the holder keeps running in the background.
-argo-hold start --app web --context prod-west1 \
+argo-hold start --app web --context my-context \
   --target deployment/web -n web --type merge \
   --patch '{"spec":{"replicas":3}}' --detach
 
