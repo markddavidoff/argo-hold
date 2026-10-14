@@ -21,7 +21,9 @@ class ArgoHold < Formula
 
   def install
     libexec.install Dir["scripts/*"]
-    bin.install_symlink libexec/"argo-hold"
+    # The launcher runs `python3` from PATH, so put the formula's Python first.
+    (bin/"argo-hold").write_env_script libexec/"argo-hold",
+      PATH: "#{Formula["python@3.12"].opt_bin}:$PATH"
   end
 
   test do
