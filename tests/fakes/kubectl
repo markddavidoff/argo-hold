@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Fake kubectl for argo-hold tests. Supports only the verbs argo-hold uses:
+get (-o json, -w --output-watch-events), patch, apply --server-side, delete, annotate,
+create --dry-run=client. Needs FAKE_KUBECTL_STORE."""
+import argparse
+import copy
+import json
+import os
+import sys
+import time
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+from fakes.fakecluster import FakeCluster, core, norm_kind  # noqa: E402
+from fakes.jsonpatch import PatchError, apply_json_patch, merge_patch, strategic_patch  # noqa: E402
+
+
+def die(msg, code=1):
+    print(msg, file=sys.stderr)
+    sys.exit(code)
+
+
+def not_found(kind, name):
+    die(f'Error from server (NotFound): {norm_kind(kind)} "{name}" not found')
+
+
+def build_parser():
+    p = argparse.ArgumentParser(add_help=False)
+    p.add_argument("--context", default="default")
+    p.add_argument("-n", "--namespace")
+    p.add_argument("-o", dest="output")
+    p.add_argument("--type", dest="ptype", default="strategic")
+    p.add_argument("-p", dest="patch")
+    p.add_argument("--field-manager", default="kubectl")
+    p.add_argument("-f", dest="filename")
+    p.add_argument("--dry-run")
+    p.add_argument("-w", action="store_true")
+    p.add_argument("--output-watch-events", action="store_true")
+    p.add_argument("--server-side", action="store_true")
+    p.add_argument("--force-conflicts", action="store_true")
+    p.add_argument("--overwrite", action="store_true")
+    p.add_argument("rest", nargs="*")
+    return p
+
+
+def emit(obj):
+    print(json.dumps(obj, indent=2), flush=True)
+
+
+def emit_event(etype, obj):
+    # Recorded from real kubectl (tests/fixtures/recorded/watch_stream.txt): watch events
+    # are compact NDJSON, one document per line. Non-watch -o json output is indented.
+    print(json.dumps({"type": etype, "object": obj}), flush=True)
+
+
+def watch(cl, ctx, kind, ns, name):
+    last_rv, last_obj = None, None
+    try:
+        while True:
+            if os.getppid() == 1:     # the holder died; do not poll forever
+                sys.exit(0)
+            obj = cl.get(ctx, kind, ns, name)
+            if obj is None:
+                if last_obj is not None:
+                    emit_event("DELETED", last_obj)
+                    last_rv, last_obj = None, None
+            else:
+                rv = obj["metadata"]["resourceVersion"]
+                if rv != last_rv:
+                    emit_event("ADDED" if last_rv is None else "MODIFIED", obj)
+                    last_rv, last_obj = rv, obj
+            time.sleep(0.05)
+    except (BrokenPipeError, KeyboardInterrupt):
+        sys.exit(0)
+
+
+def stdin_or_file(a):
+    raw = sys.stdin.read() if a.filename == "-" else open(a.filename).read()
+    return json.loads(raw)
+
+
+def main(argv):
+    a = build_parser().parse_intermixed_args(argv)
+    cl = FakeCluster(os.environ["FAKE_KUBECTL_STORE"])
+    verb, *rest = a.rest
+    cl.record(argv)
+    if cl.should_fail(verb):
+        die(f"fake failure injected for {verb}")
+    ctx, ns = a.context, a.namespace
+
+    if verb == "get":
+        kind, name = rest
+        if a.w:
+            watch(cl, ctx, kind, ns, name)
+        obj = cl.get(ctx, kind, ns, name)
+        if obj is None:
+            not_found(kind, name)
+        emit(obj)
+    elif verb == "patch":
+        kind, name = rest
+        old = cl.get(ctx, kind, ns, name)
+        if old is None:
+            not_found(kind, name)
+        doc = json.loads(a.patch)
+        try:
+            new = {"merge": merge_patch, "strategic": strategic_patch}.get(a.ptype, None)
+            new = new(old, doc) if new else apply_json_patch(old, doc)
+        except PatchError as e:
+            die(f"The request is invalid: {e}")
+        emit(new if a.dry_run == "server" else cl.update(ctx, kind, ns, name, new, a.field_manager))
+    elif verb == "apply":
+        doc = stdin_or_file(a)
+        items = doc["items"] if doc.get("kind") == "List" else [doc]
+        out = []
+        for item in items:
+            md = item["metadata"]
+            old = cl.get(ctx, item["kind"], md.get("namespace"), md["name"])
+            new = strategic_patch(old, item) if old else copy.deepcopy(item)
+            if a.dry_run == "server":
+                out.append(new)
+            else:
+                out.append(cl.update(ctx, item["kind"], md.get("namespace"), md["name"], new, a.field_manager))
+        emit(out[0] if len(out) == 1 else {"apiVersion": "v1", "kind": "List", "items": out})
+    elif verb == "delete":
+        kind, name = rest
+        if not cl.delete(ctx, kind, ns, name):
+            not_found(kind, name)
+    elif verb == "annotate":
+        kind, name, kv = rest
+        key, _, value = kv.partition("=")
+
+        def add(o):
+            o.setdefault("metadata", {}).setdefault("annotations", {})[key] = value
+
+        if cl.get(ctx, kind, ns, name) is None:
+            not_found(kind, name)
+        cl.mutate(ctx, kind, ns, name, add)
+    elif verb == "create":
+        doc = stdin_or_file(a)
+        emit(doc)
+    else:
+        die(f"fake kubectl: unsupported verb {verb}", 2)
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

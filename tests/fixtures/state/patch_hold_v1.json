@@ -1,0 +1,93 @@
+{
+ "app": "otel-collector",
+ "argocd_ns": "argo-cd",
+ "automated_was_on": true,
+ "change": {
+  "doc": {
+   "spec": {
+    "template": {
+     "spec": {
+      "affinity": {
+       "nodeAffinity": {
+        "requiredDuringSchedulingIgnoredDuringExecution": {
+         "nodeSelectorTerms": [
+          {
+           "matchExpressions": [
+            {
+             "key": "gke-nodepool",
+             "operator": "NotIn",
+             "values": [
+              "infra-pool"
+             ]
+            }
+           ]
+          }
+         ]
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "kind": "patch",
+  "type": "strategic"
+ },
+ "context": "test-ctx",
+ "expires_at": 1791593010.668108,
+ "heartbeat_at": 1791585810.668108,
+ "hostname": "fixture-host",
+ "interval": 1,
+ "last_tick": null,
+ "original_automated": {
+  "prune": true,
+  "selfHeal": true
+ },
+ "phase": "holding",
+ "pid": 999999,
+ "reapply_count": 0,
+ "reenable_count": 0,
+ "started_at": 1791585810.668108,
+ "targets": [
+  {
+   "existed": true,
+   "kind": "daemonset",
+   "manifest": null,
+   "name": "otel-collector-logs",
+   "namespace": "monitoring",
+   "paths": [
+    {
+     "before": {
+      "__argo_hold__": "ABSENT"
+     },
+     "held": {
+      "nodeAffinity": {
+       "requiredDuringSchedulingIgnoredDuringExecution": {
+        "nodeSelectorTerms": [
+         {
+          "matchExpressions": [
+           {
+            "key": "gke-nodepool",
+            "operator": "NotIn",
+            "values": [
+             "infra-pool"
+            ]
+           }
+          ]
+         }
+        ]
+       }
+      }
+     },
+     "path": [
+      "spec",
+      "template",
+      "spec",
+      "affinity"
+     ]
+    }
+   ]
+  }
+ ],
+ "ttl": 7200
+}

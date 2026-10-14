@@ -1,0 +1,13 @@
+{
+    "apiVersion": "v1",
+    "data": {
+        "a": "1"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+        "creationTimestamp": "2026-10-09T03:57:54Z",
+        "name": "rec-cm",
+        "namespace": "toy",
+        "uid": "e243176f-45f4-48e8-997c-99073af8c060"
+    }
+}

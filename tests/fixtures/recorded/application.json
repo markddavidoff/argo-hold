@@ -1,0 +1,167 @@
+{
+    "apiVersion": "argoproj.io/v1alpha1",
+    "kind": "Application",
+    "metadata": {
+        "annotations": {
+            "kubectl.kubernetes.io/last-applied-configuration": "{\"apiVersion\":\"argoproj.io/v1alpha1\",\"kind\":\"Application\",\"metadata\":{\"annotations\":{},\"name\":\"toy\",\"namespace\":\"argo-cd\"},\"spec\":{\"destination\":{\"namespace\":\"toy\",\"server\":\"https://kubernetes.default.svc\"},\"project\":\"default\",\"source\":{\"path\":\"guestbook\",\"repoURL\":\"https://github.com/argoproj/argocd-example-apps.git\",\"targetRevision\":\"HEAD\"},\"syncPolicy\":{\"automated\":{\"prune\":true,\"selfHeal\":true},\"syncOptions\":[\"CreateNamespace=true\"]}}}\n"
+        },
+        "creationTimestamp": "2026-10-09T03:57:24Z",
+        "generation": 11,
+        "name": "toy",
+        "namespace": "argo-cd",
+        "resourceVersion": "1074",
+        "uid": "aca12f82-82d2-45e0-b5b5-9bc30b055eea"
+    },
+    "spec": {
+        "destination": {
+            "namespace": "toy",
+            "server": "https://kubernetes.default.svc"
+        },
+        "project": "default",
+        "source": {
+            "path": "guestbook",
+            "repoURL": "https://github.com/argoproj/argocd-example-apps.git",
+            "targetRevision": "HEAD"
+        },
+        "syncPolicy": {
+            "automated": {
+                "prune": true,
+                "selfHeal": true
+            },
+            "syncOptions": [
+                "CreateNamespace=true"
+            ]
+        }
+    },
+    "status": {
+        "controllerNamespace": "argo-cd",
+        "health": {
+            "status": "Healthy"
+        },
+        "history": [
+            {
+                "deployStartedAt": "2026-10-09T03:57:27Z",
+                "deployedAt": "2026-10-09T03:57:29Z",
+                "id": 0,
+                "initiatedBy": {
+                    "automated": true
+                },
+                "revision": "8088f4c0d970abb09e250248cc97e35623447cb5",
+                "source": {
+                    "path": "guestbook",
+                    "repoURL": "https://github.com/argoproj/argocd-example-apps.git",
+                    "targetRevision": "HEAD"
+                }
+            }
+        ],
+        "operationState": {
+            "finishedAt": "2026-10-09T03:57:29Z",
+            "message": "successfully synced (all tasks run)",
+            "operation": {
+                "initiatedBy": {
+                    "automated": true
+                },
+                "retry": {
+                    "limit": 5
+                },
+                "sync": {
+                    "prune": true,
+                    "revision": "8088f4c0d970abb09e250248cc97e35623447cb5",
+                    "syncOptions": [
+                        "CreateNamespace=true"
+                    ]
+                }
+            },
+            "phase": "Succeeded",
+            "startedAt": "2026-10-09T03:57:27Z",
+            "syncResult": {
+                "resources": [
+                    {
+                        "group": "",
+                        "hookPhase": "Running",
+                        "kind": "Namespace",
+                        "message": "namespace/toy created",
+                        "name": "toy",
+                        "namespace": "",
+                        "status": "Synced",
+                        "syncPhase": "PreSync",
+                        "version": "v1"
+                    },
+                    {
+                        "group": "",
+                        "hookPhase": "Running",
+                        "kind": "Service",
+                        "message": "service/guestbook-ui created",
+                        "name": "guestbook-ui",
+                        "namespace": "toy",
+                        "status": "Synced",
+                        "syncPhase": "Sync",
+                        "version": "v1"
+                    },
+                    {
+                        "group": "apps",
+                        "hookPhase": "Running",
+                        "kind": "Deployment",
+                        "message": "deployment.apps/guestbook-ui created",
+                        "name": "guestbook-ui",
+                        "namespace": "toy",
+                        "status": "Synced",
+                        "syncPhase": "Sync",
+                        "version": "v1"
+                    }
+                ],
+                "revision": "8088f4c0d970abb09e250248cc97e35623447cb5",
+                "source": {
+                    "path": "guestbook",
+                    "repoURL": "https://github.com/argoproj/argocd-example-apps.git",
+                    "targetRevision": "HEAD"
+                }
+            }
+        },
+        "reconciledAt": "2026-10-09T03:57:29Z",
+        "resources": [
+            {
+                "health": {
+                    "status": "Healthy"
+                },
+                "kind": "Service",
+                "name": "guestbook-ui",
+                "namespace": "toy",
+                "status": "Synced",
+                "version": "v1"
+            },
+            {
+                "group": "apps",
+                "health": {
+                    "status": "Healthy"
+                },
+                "kind": "Deployment",
+                "name": "guestbook-ui",
+                "namespace": "toy",
+                "status": "Synced",
+                "version": "v1"
+            }
+        ],
+        "sourceType": "Directory",
+        "summary": {
+            "images": [
+                "gcr.io/google-samples/gb-frontend:v5"
+            ]
+        },
+        "sync": {
+            "comparedTo": {
+                "destination": {
+                    "namespace": "toy",
+                    "server": "https://kubernetes.default.svc"
+                },
+                "source": {
+                    "path": "guestbook",
+                    "repoURL": "https://github.com/argoproj/argocd-example-apps.git",
+                    "targetRevision": "HEAD"
+                }
+            },
+            "revision": "8088f4c0d970abb09e250248cc97e35623447cb5",
+            "status": "Synced"
+        }
+    }
+}

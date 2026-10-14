@@ -1,0 +1,11 @@
+{
+    "apiVersion": "v1",
+    "data": {
+        "a": "1"
+    },
+    "kind": "ConfigMap",
+    "metadata": {
+        "name": "c",
+        "namespace": "toy"
+    }
+}

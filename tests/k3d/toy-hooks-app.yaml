@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: toy-hooks
+  namespace: argo-cd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: pre-post-sync
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: toy-hooks
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
