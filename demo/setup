@@ -1,0 +1,58 @@
+#!/usr/bin/env python3
+"""Seed the fake cluster store for the argo-hold demo (demo/demo.tape).
+
+Writes one Argo CD Application `web` (auto-sync on) and its target `deployment/web` into
+the store named by FAKE_KUBECTL_STORE, so the recorded demo is self-contained and never
+reaches a real cluster. The demo's fake `kubectl` (demo/bin/kubectl, a symlink to the test
+suite's fake) reads the same store.
+"""
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
+from fakes.fakecluster import FakeCluster  # noqa: E402
+
+CTX = "prod-west1"
+
+APP = {
+    "apiVersion": "argoproj.io/v1alpha1",
+    "kind": "Application",
+    "metadata": {"name": "web", "namespace": "argo-cd"},
+    "spec": {
+        "project": "default",
+        "syncPolicy": {
+            "automated": {"prune": True, "selfHeal": True},
+            "syncOptions": ["CreateNamespace=true"],
+        },
+    },
+    "status": {"sync": {"status": "Synced"}},
+}
+
+DEPLOYMENT = {
+    "apiVersion": "apps/v1",
+    "kind": "Deployment",
+    "metadata": {"name": "web", "namespace": "web"},
+    "spec": {
+        "replicas": 2,
+        "template": {"spec": {"containers": [{"name": "web", "image": "web:1.0"}]}},
+    },
+    "status": {"availableReplicas": 2},
+}
+
+
+def main() -> None:
+    store = os.environ.get("FAKE_KUBECTL_STORE")
+    if not store:
+        sys.exit("set FAKE_KUBECTL_STORE first (demo/demo.tape does this)")
+    cluster = FakeCluster(store)
+    cluster.seed(CTX, APP)
+    cluster.seed(CTX, DEPLOYMENT)
+    print(f"seeded fake cluster {CTX}: application/web (auto-sync on), deployment/web")
+
+
+if __name__ == "__main__":
+    main()

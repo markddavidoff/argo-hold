@@ -1,4 +1,4 @@
-.PHONY: help test test-k3d lint
+.PHONY: help test test-k3d lint demo
 
 help: ## List targets
 	@grep -E '^[a-z0-9-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*## /\t/'
@@ -12,3 +12,7 @@ test-k3d: ## Opt-in: integration tests on a throwaway local k3d + Argo CD (docke
 
 lint: ## Lint with ruff (needs ruff, or uv: `uvx ruff check .`)
 	ruff check .
+
+demo: ## Render demo/demo.gif from demo/demo.tape (needs vhs; runs against the fake kubectl)
+	@command -v vhs >/dev/null 2>&1 || { echo "vhs not on PATH; install it from https://github.com/charmbracelet/vhs"; exit 1; }
+	vhs demo/demo.tape
