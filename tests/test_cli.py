@@ -256,3 +256,46 @@ def test_manifest_mode_rejects_target_flag(env, cluster, tmp_path):
     r = run("start", "--app", "otel-collector", "--context", CTX, "-f", str(f),
             "--target", "daemonset/x", "-n", "monitoring", "--yes")
     assert r.returncode == 1 and "derives its targets" in r.stderr
+
+
+def _app_in_ns(ns):
+    a = make_app()
+    a["metadata"]["namespace"] = ns
+    return a
+
+
+def test_argocd_namespace_defaults_to_argo_cd(env, cluster, monkeypatch):
+    monkeypatch.delenv("ARGO_HOLD_ARGOCD_NAMESPACE", raising=False)
+    r = run(*START, "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "app:       otel-collector (namespace argo-cd)" in r.stdout
+
+
+def test_argocd_namespace_env_override(env, cluster, monkeypatch):
+    cluster.seed(CTX, _app_in_ns("argocd"))          # stock Argo CD installs here
+    monkeypatch.setenv("ARGO_HOLD_ARGOCD_NAMESPACE", "argocd")
+    r = run(*START, "--dry-run")
+    assert r.returncode == 0, r.stderr
+    assert "(namespace argocd)" in r.stdout
+
+
+def test_argocd_namespace_flag_beats_env_and_default(env, cluster, monkeypatch):
+    cluster.seed(CTX, _app_in_ns("flagns"))          # only the flag's namespace has the app
+    monkeypatch.setenv("ARGO_HOLD_ARGOCD_NAMESPACE", "envns")
+    r = run(*START, "--argocd-namespace", "flagns", "--dry-run")
+    assert r.returncode == 0, r.stderr               # found => the flag namespace was used
+    assert "(namespace flagns)" in r.stdout
+
+
+def test_custom_argocd_namespace_is_recorded_and_used_by_status(env, cluster):
+    cluster.seed(CTX, _app_in_ns("argocd"))
+    p = spawn(*START, "--argocd-namespace", "argocd")
+    try:
+        assert wait_for(holding, 10)
+        assert ah_state.load("otel-collector")["argocd_ns"] == "argocd"
+        s = run("status", "--app", "otel-collector")
+        assert s.returncode == 0 and "live" in s.stdout
+    finally:
+        p.send_signal(signal.SIGTERM)
+    assert p.wait(timeout=20) == 0
+    assert ah_state.load("otel-collector") is None

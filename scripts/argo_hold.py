@@ -27,8 +27,9 @@ import ah_paths  # noqa: E402
 import ah_plan  # noqa: E402
 import ah_safety  # noqa: E402
 import ah_state  # noqa: E402
+import ah_version  # noqa: E402
 
-ARGOCD_NS = "argo-cd"
+DEFAULT_ARGOCD_NS = "argo-cd"
 RELEASE_WAIT = 120
 DEFAULT_ONCALL_CHANNEL = "#on-call"
 
@@ -36,6 +37,16 @@ DEFAULT_ONCALL_CHANNEL = "#on-call"
 def oncall_channel() -> str:
     """The channel to announce a hold in. The tool only names it; the person or agent posts."""
     return os.environ.get("ARGO_HOLD_ONCALL_CHANNEL", "").strip() or DEFAULT_ONCALL_CHANNEL
+
+
+def argocd_namespace(args) -> str:
+    """Namespace Argo CD runs in, for a `start`: --argocd-namespace over
+    ARGO_HOLD_ARGOCD_NAMESPACE over the default `argo-cd`. `status` and `release` instead
+    use the namespace recorded in the state file, so they find the app the hold used."""
+    flag = getattr(args, "argocd_namespace", None)
+    if flag:
+        return flag
+    return os.environ.get("ARGO_HOLD_ARGOCD_NAMESPACE", "").strip() or DEFAULT_ARGOCD_NS
 
 
 def parse_duration(s) -> int:
@@ -56,11 +67,14 @@ def humanize(seconds: float) -> str:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="argo-hold", description=__doc__,
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-V", "--version", action="version", version=f"argo-hold {ah_version.__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start", help="hold auto-sync off, and apply a live change unless --freeze")
     s.add_argument("--app", required=True)
     s.add_argument("--context", required=True, help="kube context (required; echoed before acting)")
     s.add_argument("-n", "--namespace", help="namespace of the target objects")
+    s.add_argument("--argocd-namespace", metavar="NS",
+                   help="namespace Argo CD runs in (default argo-cd; or ARGO_HOLD_ARGOCD_NAMESPACE)")
     s.add_argument("--target", action="append", default=[], metavar="KIND/NAME")
     g = s.add_mutually_exclusive_group(required=True)
     g.add_argument("--patch", help="patch body (JSON)")
@@ -129,9 +143,9 @@ def load_change(args, kube):
     return {"kind": "patch", "type": args.type, "doc": doc}, specs
 
 
-def plan_lines(args, plan) -> list[str]:
+def plan_lines(args, plan, argocd_ns) -> list[str]:
     lines = [f"context:   {args.context}",
-             f"app:       {args.app} (namespace {ARGOCD_NS})",
+             f"app:       {args.app} (namespace {argocd_ns})",
              f"ttl:       {args.ttl}    interval: {args.interval}s",
              f"on-call:   {oncall_channel()} (post the on-call notice here before a live start)"]
     if args.freeze:
@@ -179,12 +193,13 @@ def cmd_start(args) -> int:
     if ah_state.load(args.app) is not None:
         raise ah_state.HoldExists(args.app)
     kube = ah_kube.Kube(args.context)
+    argocd_ns = argocd_namespace(args)
     change, specs = load_change(args, kube)
     for s in specs:
         ah_safety.check_target_allowed(s["kind"])
     ttl, wait_op = parse_duration(args.ttl), parse_duration(args.wait_op)
-    plan = ah_plan.make_plan(kube, args.app, ARGOCD_NS, change, specs)
-    lines = plan_lines(args, plan)
+    plan = ah_plan.make_plan(kube, args.app, argocd_ns, change, specs)
+    lines = plan_lines(args, plan, argocd_ns)
     if args.dry_run:
         print("\n".join(lines))
         print("dry-run: nothing was changed")
@@ -196,7 +211,7 @@ def cmd_start(args) -> int:
         return spawn_detached(args)
 
     log = make_log(args.app, echo=not args._child)
-    payload = ah_hold.begin(kube, app=args.app, argocd_ns=ARGOCD_NS, context=args.context, change=change,
+    payload = ah_hold.begin(kube, app=args.app, argocd_ns=argocd_ns, context=args.context, change=change,
                             specs=specs, confirmed_plan=plan, ttl=ttl, interval=args.interval,
                             wait_op=wait_op)
     holder = ah_hold.Holder(kube, payload, resolution=float(os.environ.get("ARGO_HOLD_TICK", "1.0")),
