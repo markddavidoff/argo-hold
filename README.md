@@ -14,10 +14,9 @@ cluster before you open the PR. But the app has Argo CD auto-sync with self-heal
 keeps your change applied for as long as you need (bounded by a TTL), and on `release`
 reverts the change and restores the sync policy. It never edits Git.
 
-<!-- Demo GIF: render with `make demo` (needs vhs), commit demo/demo.gif, then uncomment:
-![argo-hold demo](demo/demo.gif)
-*The demo runs against a fake cluster — no real cluster is touched.*
--->
+![argo-hold demo: dry-run, hold, status, release](demo/demo.gif)
+
+*The demo runs against a fake cluster. No real cluster is touched.*
 
 ```mermaid
 flowchart TB
@@ -109,6 +108,12 @@ and let Argo CD sync it. `argo-hold` is only for a temporary, reversible test be
 ## Install
 
 ```bash
+brew install markddavidoff/tap/argo-hold
+```
+
+Or from source, with no dependencies to build:
+
+```bash
 git clone https://github.com/markddavidoff/argo-hold.git
 cd argo-hold
 ./install.sh                  # symlinks argo-hold into ~/.local/bin
@@ -121,10 +126,6 @@ cd argo-hold
 ./install.sh --prefix DIR     # symlink into DIR/bin instead
 ./install.sh --uninstall
 ```
-
-<!-- Available after v0.1.0 is released and the Homebrew tap is published (see RELEASING.md):
-brew install markddavidoff/tap/argo-hold
--->
 
 The tool is standard-library-only Python; `install.sh` just symlinks the launcher, with no
 sudo and no dependencies to build.

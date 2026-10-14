@@ -59,8 +59,8 @@ from the release tarball, so its `url` and `sha256` change on every release.
 
 ## 4. Announce
 
-Enable the README Homebrew install line (it is held in an HTML comment until the first
-release is published) and confirm the release badge on the README shows the new version.
+Confirm the release badge on the README shows the new version and that
+`brew install markddavidoff/tap/argo-hold` installs it and `argo-hold --version` prints it.
 
 ## Manual, one-time repo settings
 
@@ -68,5 +68,5 @@ These cannot be set through the GitHub API and must be done once in the web UI:
 
 - **Social preview image:** GitHub **Settings -> General -> Social preview**. Upload a PNG
   (recommended 1280x640). Not faked or scripted here.
-- **Publish the demo GIF:** run `make demo` (needs `vhs`), commit `demo/demo.gif`, and
-  uncomment the image line near the top of `README.md`.
+- **Regenerate the demo GIF** after any change to the CLI output it shows: run `make demo`
+  (needs `vhs`) and commit the new `demo/demo.gif`.

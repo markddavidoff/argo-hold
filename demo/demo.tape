@@ -15,38 +15,38 @@ Set Padding 24
 Set TypingSpeed 40ms
 
 Hide
-Type "export PATH=\"$PWD/scripts:$PWD/demo/bin:$PATH\"" Enter
-Type "export ARGO_HOLD_KUBECTL=\"$PWD/demo/bin/kubectl\"" Enter
-Type "export ARGO_HOLD_STATE_DIR=\"$(mktemp -d)\"" Enter
-Type "export FAKE_KUBECTL_STORE=\"$(mktemp -d)/cluster.json\"" Enter
-Type "export ARGO_HOLD_TICK=0.2" Enter
-Type "python3 demo/setup >/dev/null" Enter
-Type "clear" Enter
+Type `export PATH="$PWD/scripts:$PWD/demo/bin:$PATH"` Enter
+Type `export ARGO_HOLD_KUBECTL="$PWD/demo/bin/kubectl"` Enter
+Type `rm -rf /tmp/ah-demo && export ARGO_HOLD_STATE_DIR=/tmp/ah-demo` Enter
+Type `export FAKE_KUBECTL_STORE="$(mktemp -d)/cluster.json"` Enter
+Type `export ARGO_HOLD_TICK=0.2` Enter
+Type `python3 demo/setup >/dev/null` Enter
+Type `clear` Enter
 Show
 
-Type "# argo-hold runs against a FAKE cluster here. No real cluster is touched." Enter
+Type `# argo-hold runs against a FAKE cluster here. No real cluster is touched.` Enter
 Sleep 2s
 
-Type "# 1. Dry-run: see exactly what the hold would change." Enter
-Type "argo-hold start --app web --context my-context \\" Enter
-Type "  --target deployment/web -n web --type merge \\" Enter
-Type "  --patch '{\"spec\":{\"replicas\":3}}' --dry-run" Enter
+Type `# 1. Dry-run: see exactly what the hold would change.` Enter
+Type `argo-hold start --app web --context my-context \` Enter
+Type `  --target deployment/web -n web --type merge \` Enter
+Type `  --patch '{"spec":{"replicas":3}}' --dry-run` Enter
 Sleep 3s
 
-Type "# 2. Start the hold in the background (auto-sync goes off; the change stays)." Enter
-Type "argo-hold start --app web --context my-context \\" Enter
-Type "  --target deployment/web -n web --type merge \\" Enter
-Type "  --patch '{\"spec\":{\"replicas\":3}}' --detach --yes --interval 2" Enter
+Type `# 2. Start the hold in the background (auto-sync goes off; the change stays).` Enter
+Type `argo-hold start --app web --context my-context \` Enter
+Type `  --target deployment/web -n web --type merge \` Enter
+Type `  --patch '{"spec":{"replicas":3}}' --detach --yes --interval 2` Enter
 Sleep 3s
 
-Type "# 3. Check the hold, then test whatever you came to test." Enter
-Type "argo-hold status --app web" Enter
+Type `# 3. Check the hold, then test whatever you came to test.` Enter
+Type `argo-hold status --app web` Enter
 Sleep 3s
-Type "argo-hold list" Enter
+Type `argo-hold list` Enter
 Sleep 2s
 
-Type "# 4. Release: revert the change and turn auto-sync back on." Enter
-Type "argo-hold release --app web" Enter
+Type `# 4. Release: revert the change and turn auto-sync back on.` Enter
+Type `argo-hold release --app web` Enter
 Sleep 3s
-Type "argo-hold list" Enter
+Type `argo-hold list` Enter
 Sleep 3s
