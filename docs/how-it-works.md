@@ -7,7 +7,18 @@ same tool with no change: it only holds auto-sync off ([Freeze mode](#freeze-mod
 commands and flags, see [`../README.md`](../README.md).
 
 The tool talks to the cluster only through `kubectl`; it never uses the `argocd` CLI.
-Argo CD is expected in namespace `argo-cd`.
+Argo CD is expected in namespace `argo-cd` by default; pass `--argocd-namespace` (or set
+`ARGO_HOLD_ARGOCD_NAMESPACE`) for a different install, such as the stock `argocd` namespace.
+
+## What it changes in the cluster
+
+| Object | Change at `start` | Change at `release` |
+|---|---|---|
+| The Argo CD Application | Sets `spec.syncPolicy.automated` to null (only when it was set). The other `syncPolicy` fields stay. | Puts the original `automated` value back, then sets the annotation `argocd.argoproj.io/refresh=hard` (only when the original had `automated`). |
+| Each target object | Applies your change: a `kubectl patch`, or for `-f` a create (new object) or a merge patch (existing object). A freeze has no target objects. | Reverts the touched paths with a JSON patch, or deletes an object the hold created. |
+
+`kubectl` records `argo-hold` as the field manager on these writes. The tool changes nothing
+else: no other Application field, no other object, no Argo CD setting, no Git repository.
 
 ## Start sequence
 
@@ -274,7 +285,7 @@ The command to run against a live cluster:
 
 ```bash
 argo-hold start --app otel-collector \
-  --context gke_my-project_us-west1_my-cluster \
+  --context prod-west1 \
   --target daemonset/otel-collector-logs -n monitoring --type strategic \
   --patch '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"gke-nodepool","operator":"NotIn","values":["infra-pool"]}]}]}}}}}}}' \
   --dry-run          # then drop --dry-run, add --detach, confirm at the prompt

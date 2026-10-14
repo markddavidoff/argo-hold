@@ -1,21 +1,110 @@
 # argo-hold
 
 [![CI](https://github.com/markddavidoff/argo-hold/actions/workflows/ci.yml/badge.svg)](https://github.com/markddavidoff/argo-hold/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)
+[![Latest release](https://img.shields.io/github/v/release/markddavidoff/argo-hold?label=release)](https://github.com/markddavidoff/argo-hold/releases)
 
-`argo-hold` tests an infrastructure change in a live cluster before it merges to GitOps. It
-turns one Argo CD app's auto-sync off and keeps a live change applied to that app's resources.
-`argo-hold release` reverts the change and restores the app's sync policy. With `--freeze`,
-`argo-hold` applies no change: it turns auto-sync off and keeps it off, so nothing syncs to
-that app until `release`.
+**Try an infrastructure change on a live, Argo CD-managed cluster before it merges to Git —
+then put everything back.**
 
-Without a hold, an app with auto-sync and `selfHeal` reverts a live `kubectl patch` within
-seconds. `argo-hold` keeps the change in place, then undoes it, and it never edits git.
+You changed a Helm value or patched a resource and want to watch it behave on the real
+cluster before you open the PR. But the app has Argo CD auto-sync with self-heal on, so your
+`kubectl` edit is reverted within seconds. `argo-hold` turns that one app's auto-sync off,
+keeps your change applied for as long as you need (bounded by a TTL), and on `release`
+reverts the change and restores the sync policy. It never edits Git.
 
-## Requirements
+<!-- Demo GIF: render with `make demo` (needs vhs), commit demo/demo.gif, then uncomment:
+![argo-hold demo](demo/demo.gif)
+*The demo runs against a fake cluster — no real cluster is touched.*
+-->
 
-- Python 3.10 or newer. The tool uses only the standard library.
-- `kubectl`, with access to the cluster context you pass in `--context`.
-- Argo CD running in namespace `argo-cd`.
+```mermaid
+flowchart TB
+    subgraph nohold["Without a hold (auto-sync + self-heal on)"]
+        direction LR
+        A1["You kubectl patch a field"] --> A2["Argo CD sees drift"] --> A3["self-heal reverts it in seconds"]
+    end
+    subgraph hold["With argo-hold"]
+        direction LR
+        B1["argo-hold start<br/>turns auto-sync off"] --> B2["your change stays applied"] --> B3["test on the live cluster"] --> B4["argo-hold release<br/>reverts the change,<br/>restores auto-sync"]
+    end
+    nohold --> hold
+```
+
+## New to Argo CD?
+
+[Argo CD](https://argo-cd.readthedocs.io/) keeps a cluster matching the manifests in a Git
+repo. When an Application has an
+[automated sync policy](https://argo-cd.readthedocs.io/en/stable/user-guide/auto_sync/),
+`selfHeal: true` makes Argo CD revert any live change that drifts from Git (that is what
+undoes your `kubectl` edit), and `prune: true` deletes resources that are no longer in Git.
+`argo-hold` pauses that automation for one app, temporarily, so a live change survives long
+enough to test.
+
+## Limits worth knowing first
+
+- **The TTL is enforced client-side.** The holder process on your machine turns auto-sync
+  back on when the TTL expires. If your machine sleeps or loses its network, auto-sync
+  stays off until the machine is back and you run `argo-hold release --app NAME` (which works
+  from the saved state file, even after the holder is gone). There is no cluster-side expiry.
+- **Releasing a freeze syncs everything at once.** When `release` turns auto-sync back on,
+  Argo CD syncs every change that merged to Git while the hold was active, together.
+- **Interactions with ApplicationSet and app-of-apps are untested.** A parent that re-renders
+  the Application, and `ignoreDifferences` with `RespectIgnoreDifferences`, have not been
+  verified. See [limits and unverified behavior](docs/how-it-works.md#limitations-and-observations).
+- **Test evidence is from one cluster.** See [Tested versions](#tested-versions).
+
+## Quick start
+
+`argo-hold` needs Python 3.10+, `kubectl` with access to your context, and Argo CD running
+in the cluster (namespace `argo-cd` by default; pass `--argocd-namespace` for a stock
+`argocd` install). Install it (see [Install](#install)), then:
+
+```bash
+# 1. Plan only. Prints the context, app, touched paths, and release behavior; changes nothing.
+argo-hold start --app web --context prod-west1 \
+  --target deployment/web -n web --type merge \
+  --patch '{"spec":{"replicas":3}}' --dry-run
+
+# 2. Run it for real. Confirm at the prompt; the holder keeps running in the background.
+argo-hold start --app web --context prod-west1 \
+  --target deployment/web -n web --type merge \
+  --patch '{"spec":{"replicas":3}}' --detach
+
+# 3. Test whatever you came to test, then undo everything.
+argo-hold status --app web
+argo-hold release --app web
+```
+
+A hold ends on its own after `--ttl` (default 2h). While it lasts, the app gets no other
+GitOps changes, so keep it short. Read [Safety](#safety) before pointing this at a shared
+cluster.
+
+### Try it without a cluster
+
+- **The demo:** `make demo` renders a short GIF of a full hold cycle against a fake
+  `kubectl` (needs [vhs](https://github.com/charmbracelet/vhs); nothing real is touched).
+  The tape is in [`demo/demo.tape`](demo/demo.tape).
+- **A throwaway real cluster:** `make test-k3d` spins up a local [k3d](https://k3d.io)
+  cluster with Argo CD and runs the integration tests against it (needs docker, k3d, and
+  network). See [`docs/k3d-findings.md`](docs/k3d-findings.md).
+
+## Why not just...
+
+Each alternative is real and sometimes the right call. `argo-hold` fills one narrow gap: a
+short, reversible, ad-hoc live test of a change you have **not** yet committed to Git.
+
+| Instead of a hold | What it does | Reach for it when |
+|---|---|---|
+| `argocd app set <app> --sync-policy none` (or the UI auto-sync toggle) | Sets the sync policy to manual, so self-heal stops reverting edits ([`none` is an alias of `manual`](https://argo-cd.readthedocs.io/en/stable/user-guide/commands/argocd_app_set/)). | You want to turn automation off for a while and will revert your edit and re-enable the policy yourself. `argo-hold` adds a TTL, an automatic revert of both the edit and the exact prior policy, and refusals for sensitive apps. |
+| [`spec.ignoreDifferences`](https://argo-cd.readthedocs.io/en/stable/user-guide/sync-options/) in the Application | Tells Argo CD to ignore specific fields when it computes sync status (and, with `RespectIgnoreDifferences`, when it applies). Lives in Git. | A field should *always* be ignored, as committed policy — not for a one-off test. |
+| [Sync windows](https://argo-cd.readthedocs.io/en/stable/user-guide/sync_windows/) in the AppProject | Time-based allow/deny windows that gate when syncs run, by selector. | You need recurring, scheduled freeze periods across apps — not an ad-hoc hold on one app. |
+| `kubectl patch` with auto-sync + self-heal on | Your edit is reverted within seconds (about 1s on the k3d test cluster). | This is the problem `argo-hold` exists to solve. |
+| [Tilt](https://tilt.dev/), [Skaffold](https://skaffold.dev/), [Telepresence](https://telepresence.io/) | Local development inner-loop tools that deploy your working copy to a cluster. | You are iterating on application code, not testing an infra change against the GitOps-managed app. |
+
+**When `argo-hold` is the wrong tool:** if the change should be permanent, commit it to Git
+and let Argo CD sync it. `argo-hold` is only for a temporary, reversible test before merging.
 
 ## Install
 
@@ -23,146 +112,117 @@ seconds. `argo-hold` keeps the change in place, then undoes it, and it never edi
 git clone https://github.com/markddavidoff/argo-hold.git
 cd argo-hold
 ./install.sh                  # symlinks argo-hold into ~/.local/bin
-./install.sh --prefix DIR     # or into DIR/bin
+```
+
+<details>
+<summary>Other install options</summary>
+
+```bash
+./install.sh --prefix DIR     # symlink into DIR/bin instead
 ./install.sh --uninstall
 ```
 
-## Quick start
+<!-- Available after v0.1.0 is released and the Homebrew tap is published (see RELEASING.md):
+brew install markddavidoff/tap/argo-hold
+-->
 
-```bash
-# 1. Plan only. Prints the context, app, touched paths and release behavior; changes nothing.
-argo-hold start --app my-app --context my-ctx \
-  --target deployment/web -n web --type merge \
-  --patch '{"spec":{"replicas":3}}' --dry-run
-
-# 2. Run it for real. Confirm at the prompt; the holder keeps running in the background.
-argo-hold start --app my-app --context my-ctx \
-  --target deployment/web -n web --type merge \
-  --patch '{"spec":{"replicas":3}}' --detach
-
-# 3. Test whatever you came to test, then undo everything.
-argo-hold status --app my-app
-argo-hold release --app my-app
-```
-
-A hold ends on its own after `--ttl` (default 2h). While it lasts, the app gets no other
-GitOps changes, so keep it short. See [Safety](#safety) before pointing this at a shared
-cluster.
+The tool is standard-library-only Python; `install.sh` just symlinks the launcher, with no
+sudo and no dependencies to build.
+</details>
 
 ## How it works
 
-An app with auto-sync on and `selfHeal` reverts a live edit: a `kubectl patch` to a field
-that git manages is gone within seconds (about one second on the k3d test cluster). To test a
-change live, auto-sync has to stay off and the change has to stay applied until the test ends.
-`argo-hold` does both with a **holder** process, and `release` undoes them.
+`argo-hold` turns one Application's `spec.syncPolicy.automated` off, applies your change, and
+runs a **holder** process that re-disables auto-sync and re-applies the change whenever
+something reverts them. `release` restores the original policy and reverts the change from a
+saved state file, so it works even after the holder has crashed. The revert never relies on
+Argo CD to undo the change.
 
-### What it changes in the cluster
+Read [`docs/how-it-works.md`](docs/how-it-works.md) for the start sequence, the holder's
+watchers/reactor/timer, the no-clobber revert rule, freeze mode, failure modes, and the k3d
+findings behind these rules.
 
-| Object | Change at `start` | Change at `release` |
+## Usage
+
+```bash
+argo-hold start  --app NAME --context CTX \
+                 --target KIND/NAME -n NS (--patch JSON | --patch-file FILE) --type merge|json|strategic
+argo-hold start  --app NAME --context CTX -f MANIFEST
+argo-hold start  --app NAME --context CTX --freeze     # no change; only keep auto-sync off
+argo-hold status --app NAME
+argo-hold release --app NAME [--force]
+argo-hold list
+argo-hold --version
+```
+
+A typical session: `start --dry-run` to see the plan, post the on-call notice (a team
+convention; see [Safety](#safety)), `start --detach` to run it, `status` to watch it, and
+`release` to undo it.
+
+<details>
+<summary><code>start</code> flags</summary>
+
+| Flag | Meaning |
+|---|---|
+| `--app APP` | The Argo CD Application to hold. Required. |
+| `--context CONTEXT` | The kube context. Required; printed before anything changes. |
+| `-n`, `--namespace NS` | Namespace of the target objects. |
+| `--argocd-namespace NS` | Namespace Argo CD runs in. Default `argo-cd`; overrides `ARGO_HOLD_ARGOCD_NAMESPACE`. `status` and `release` use the value recorded when the hold started. |
+| `--target KIND/NAME` | An object to change. Repeat for more than one. |
+| `--patch JSON` | Patch body as JSON. |
+| `--patch-file FILE` | File that holds the patch body as JSON. |
+| `-f`, `--filename FILE` | A manifest. Targets come from the manifest, so `--target` and `--type` are rejected. An object that does not exist is created; one that exists is merge-patched. |
+| `--freeze` | Apply no change: only turn auto-sync off and keep it off. Rejects `--target`, `-n` and `--type`. `release` turns auto-sync back on, and every change pending in Git syncs at once. |
+| `--type merge\|json\|strategic` | Patch type. Required with `--patch` and `--patch-file`. |
+| `--ttl 2h` | Time until the hold releases itself. Accepts `s`, `m`, `h` suffixes. Default `2h`. |
+| `--interval 60` | Heartbeat and safety-resync period in seconds. Default `60`. |
+| `--wait-op 5m` | How long to wait for a running sync before giving up. Default `5m`. |
+| `--dry-run` | Print the plan and stop. Nothing is changed. |
+| `--detach` | Run the holder in the background after you confirm. |
+| `--yes` | Skip the confirmation prompt. |
+| `--allow-sensitive` | Allow the denylisted apps. |
+
+Exactly one of `--patch`, `--patch-file`, `-f`, and `--freeze` is required.
+
+`release` signals a live holder and waits for it to revert; if the holder is gone, it reverts
+from the state file. A field that someone else changed during the hold is skipped with a
+warning; `--force` overwrites it. Releasing a freeze prints a `NOTICE:` line first.
+</details>
+
+<details>
+<summary>Environment variables</summary>
+
+| Variable | Default | Effect |
 |---|---|---|
-| The Argo CD Application | Sets `spec.syncPolicy.automated` to null (only when it was set). The other `syncPolicy` fields stay. | Puts the original `automated` value back, then sets the annotation `argocd.argoproj.io/refresh=hard` (only when the original had `automated`). |
-| Each target object | Applies your change: a `kubectl patch`, or for `-f` a create (new object) or a merge patch (existing object). A freeze has no target objects. | Reverts the touched paths with a JSON patch, or deletes an object the hold created. |
+| `ARGO_HOLD_STATE_DIR` | `$HOME/.local/state/argo-hold` | Where state and log files live. |
+| `ARGO_HOLD_KUBECTL` | `kubectl` | The `kubectl` binary to run; the tests point it at a fake. |
+| `ARGO_HOLD_ARGOCD_NAMESPACE` | `argo-cd` | Namespace Argo CD runs in, for `start`. `--argocd-namespace` overrides it. A stock Argo CD install uses `argocd`. |
+| `ARGO_HOLD_DENYLIST_EXTRA` | unset | Comma- or space-separated app names to refuse in addition to the built-in denylist (`argo-cd`, `app-root`, `external-secrets`). `--allow-sensitive` overrides them. |
+| `ARGO_HOLD_ONCALL_CHANNEL` | `#on-call` | The on-call channel that `start` names on the `on-call:` line of its plan output. A blank value uses the default. The tool never posts to it. |
+</details>
 
-`kubectl` records `argo-hold` as the field manager on these writes. The tool changes nothing
-else: no other Application field, no other object, no Argo CD setting, no git repository.
+<details>
+<summary>Exit codes</summary>
 
-### `start`
+| Code | Meaning |
+|---|---|
+| 0 | Success |
+| 1 | Error or refusal |
+| 2 | Usage error |
+| 3 | Finished with warnings; the state file is kept (`release --force` finishes the job), or `status` found a dead or stale holder |
+</details>
 
-`start` runs these steps in order:
+## Example session
 
-1. **Check the request.** It refuses a denylisted app, a `Secret` target, and an app that
-   already has a hold.
-2. **Plan, read-only.** It reads the Application and each target and asks the API server to
-   dry-run the change (`--dry-run=server`). The difference between the live object and the
-   dry-run result is the list of **touched paths**. An added block is one path, and an array
-   is always one whole path.
-3. **Show the plan** and ask `Proceed? [y/N]` unless `--yes` is set. `--dry-run` stops here.
-4. **Take the lock and plan again.** Creating `<app>.json` in the state directory is the
-   one-hold-per-app lock. If the second plan differs from the one you confirmed, `start`
-   removes the file and exits.
-5. **Turn auto-sync off.**
-6. **Wait for a running sync** to finish, for at most `--wait-op` (default 5m). It never ends
-   a sync; on timeout it exits and applies nothing.
-7. **Apply the change** and hand over to the holder. A freeze has no change to apply.
-
-A failure after step 5 runs the release path before `start` exits.
-
-### While the change is held
-
-After `start` applies the change, the holder keeps auto-sync off and the change applied. It
-has three parts:
-
-- **Watchers.** One `kubectl get -w` per watched object: the Application and each target.
-- **Reactor.** One thread reads the watch events, so every write to the cluster is serial.
-  When `spec.syncPolicy.automated` reappears on the Application, the reactor removes it again
-  and logs a `WARNING`. When a touched path on a target no longer matches its held value
-  (Argo or someone else reverted it), the reactor re-applies the change and logs it. It reads
-  the paths from the event itself, so a check costs no extra API call. It defers more than 5
-  re-applies in 60 seconds to the next resync.
-- **Timer.** Every `--interval` seconds (default 60) it writes a heartbeat and queues a full
-  re-read of every watched object, which catches a watch that stalled silently. It also ends
-  the hold when the TTL (`--ttl`, default 2h) runs out. The timer never changes the cluster.
-
-The holder reacts to an event within seconds. `--interval` bounds only the worst case of a
-silent watch stall.
-
-### `release`
-
-`release` runs one revert path, whether the holder runs it (TTL expiry, Ctrl-C, SIGTERM, or
-`release` signalling a live holder) or `release` runs it from the state file because the
-holder is gone. The order is targets, then the Application policy, then the hard refresh. A
-failing step does not stop the next one, because leaving auto-sync off is worse than a
-half-reverted change.
-
-- **The revert never relies on Argo.** On the k3d cluster, Argo left a hand-added field in
-  place after the policy was restored. The tool reverts each touched path itself.
-- **It never overwrites someone else's change.** Before it restores a path, the tool checks
-  that the path still holds the value the hold set. If another writer changed it, the tool
-  skips the path with a warning and keeps the state file; `release --force` overwrites it.
-- **A created object is deleted** only when `argo-hold` is its only field manager, or when
-  `--force` is set.
-
-### Freeze: keep auto-sync off, apply nothing
-
-`start --freeze` runs the same sequence without a change. It turns `automated` off (only when
-it was set), records the original value, waits for a running sync, and starts the holder. The
-holder watches only the Application, and turns `automated` off again if it reappears. Use it
-to stop an app from syncing while you do something else, for example to freeze a parent app
-such as `app-root` while another hold runs a test on a child.
-
-`--freeze` is an alternative to `--patch`, `--patch-file` and `-f`, and takes no `--target`,
-`-n` or `--type`.
-
-**Releasing a freeze syncs everything that is pending.** `release` restores the original
-`automated` value and requests a hard refresh, exactly as for any other hold. With auto-sync
-back on, Argo syncs every change that merged to git during the freeze, all at once. The
-`--dry-run` plan says so (`release:` line), and `release` prints a `NOTICE:` line before it
-acts; the holder writes the same line to the log when the TTL runs out or a signal ends the
-hold. If `automated` was already off when the freeze started, release leaves it off and the
-notice says so. A freeze cannot undo a sync that lands in the moment between something
-re-enabling `automated` and the holder turning it off again.
-
-### Files on disk
-
-Each hold has `<app>.json` and `<app>.log` in `$ARGO_HOLD_STATE_DIR`, or
-`~/.local/state/argo-hold` when that is unset (directory mode 0700, files 0600). The JSON file
-records the context, TTL, the original `automated` value, the change (`change.kind` is
-`patch`, `manifest` or `freeze`), and each target's touched paths with their before and held
-values. A freeze has no targets. `status` and `release` need only this file,
-so both work after the holder crashed.
-
-[`docs/how-it-works.md`](docs/how-it-works.md) has the details: failure modes, what is
-unverified, and the k3d findings behind these rules.
-
-## A session, step by step
-
-This is real output from the fake `kubectl` that the unit tests use, so the context is
-`test-ctx`. The code path is the same against a real cluster; only the context name and the
-object contents differ.
+Recorded against the test suite's fake `kubectl`, so the context is `test-ctx` and the
+objects are the test fixtures. The code path is identical against a real cluster; only the
+context name and object contents differ.
 
 ```text
 $ argo-hold start --app otel-collector --context test-ctx --target daemonset/otel-collector-logs \
-    -n monitoring --type strategic --patch '{...affinity...}' --dry-run
+    -n monitoring --type strategic \
+    --patch '{"spec":{"template":{"spec":{"affinity":{"nodeAffinity":{"requiredDuringSchedulingIgnoredDuringExecution":{"nodeSelectorTerms":[{"matchExpressions":[{"key":"gke-nodepool","operator":"NotIn","values":["infra-pool"]}]}]}}}}}}}' \
+    --dry-run
 context:   test-ctx
 app:       otel-collector (namespace argo-cd)
 ttl:       2h    interval: 60s
@@ -172,10 +232,6 @@ target:    daemonset/otel-collector-logs -n monitoring
              add      /spec/template/spec/affinity  (object(1 keys))
 dry-run: nothing was changed
 
-$ argo-hold start ... --detach --yes          # same command, now for real
-(prints the plan again, then:)
-argo-hold: holding otel-collector (pid 63056); log: ~/.local/state/argo-hold/otel-collector.log
-
 $ argo-hold status --app otel-collector
 app:         otel-collector   context: test-ctx
 holder:      pid 63056 (live), phase holding
@@ -184,22 +240,12 @@ ttl left:    1h 59m
 activity:    0 auto-sync re-disable(s), 0 re-apply(s)
 live:        auto-sync off, sync status Synced
 
-$ argo-hold list
-otel-collector                 test-ctx                                 live      ttl 1h 59m
-
-$ argo-hold start ... --yes                   # a second hold on the same app
-argo-hold: a hold for otel-collector already exists; use `argo-hold status --app otel-collector` or `argo-hold release --app otel-collector`
-                                              # exit 1
-
 $ argo-hold release --app otel-collector
 releasing otel-collector on context test-ctx
 released
-
-$ argo-hold list
-no active holds
 ```
 
-The log of that session, from `~/.local/state/argo-hold/otel-collector.log`:
+The log shows paths and counts, never values:
 
 ```text
 holding otel-collector on test-ctx; ttl 2h; release with: argo-hold release --app otel-collector
@@ -210,13 +256,10 @@ otel-collector: requested hard refresh
 released
 ```
 
-Each log line starts with a timestamp, which this example omits. The log shows paths and
-counts, never values.
+### Freeze, step by step
 
-### A freeze, step by step
-
-Real output from the same fake `kubectl`. The app is `app-root`, which is on the denylist, so
-`--allow-sensitive` is required.
+Same fake `kubectl`. The app is `app-root`, which is on the denylist, so `--allow-sensitive`
+is required. A freeze applies no change; it only keeps auto-sync off.
 
 ```text
 $ argo-hold start --app app-root --context test-ctx --freeze --allow-sensitive --dry-run
@@ -229,95 +272,36 @@ auto-sync: will be turned OFF
 release:   turns auto-sync back on and requests a hard refresh; EVERY change pending in git for app-root syncs at once
 dry-run: nothing was changed
 
-$ argo-hold status --app app-root
-app:         app-root   context: test-ctx
-mode:        freeze (no change)
-holder:      pid 77584 (live), phase holding
-heartbeat:   0s ago (interval 1s)
-ttl left:    1h 59m
-activity:    0 auto-sync re-disable(s)
-live:        auto-sync off, sync status Synced
-
-$ argo-hold list
-app-root                       test-ctx                                 live      ttl 1h 59m  freeze (no change)
-
 $ argo-hold release --app app-root
 releasing app-root on context test-ctx
 NOTICE: releasing the freeze on app-root turns auto-sync back on, and a hard refresh is requested: every change pending in git syncs at once
 released
 ```
 
-Two holds on different apps run at the same time, for example a freeze on `app-root` and a
-patch hold on `otel-collector`. Each has its own state file, holder and TTL. Release them in
-either order; releasing one leaves the other held.
+Holds on different apps are independent — each has its own state file, holder, and TTL — so a
+freeze on a parent app and a patch hold on a child can run at the same time and release in
+either order.
 
-## Usage
+## Tested versions
 
-```bash
-argo-hold start  --app NAME --context CTX \
-                 --target KIND/NAME -n NS (--patch JSON | --patch-file FILE) --type merge|json|strategic
-argo-hold start  --app NAME --context CTX -f MANIFEST
-argo-hold start  --app NAME --context CTX --freeze     # no change; only keep auto-sync off
-argo-hold status --app NAME
-argo-hold release --app NAME [--force]
-argo-hold list
-```
+Only these were observed; everything else is **not tested**. The real-cluster evidence is one
+k3d run (see [`docs/k3d-findings.md`](docs/k3d-findings.md)).
 
-A typical session:
-
-```bash
-argo-hold start ... --dry-run          # print the plan; change nothing
-# post the on-call notice in the channel on the plan's on-call: line (required; see Safety)
-argo-hold start ... --detach           # confirm at the prompt; the holder runs in the background
-argo-hold status --app NAME            # holder state, TTL left, live auto-sync state
-argo-hold release --app NAME           # revert the change, restore the app
-# reply in the on-call thread that the hold is released
-```
-
-### `start` flags
-
-| Flag | Meaning |
-|---|---|
-| `--app APP` | The Argo CD Application to hold. Required. |
-| `--context CONTEXT` | The kube context. Required; printed before anything changes. |
-| `-n`, `--namespace NS` | Namespace of the target objects. |
-| `--target KIND/NAME` | An object to change. Repeat for more than one. |
-| `--patch JSON` | Patch body as JSON. |
-| `--patch-file FILE` | File that holds the patch body as JSON. |
-| `-f`, `--filename FILE` | A manifest. Targets come from the manifest, so `--target` and `--type` are rejected. An object that does not exist is created; one that exists is merge-patched. |
-| `--freeze` | Apply no change: only turn auto-sync off and keep it off. Rejects `--target`, `-n` and `--type`. `release` turns auto-sync back on, and every change pending in git syncs at once. |
-| `--type merge\|json\|strategic` | Patch type. Required with `--patch` and `--patch-file`. |
-| `--ttl 2h` | Time until the hold releases itself. Accepts `s`, `m`, `h` suffixes. Default `2h`. |
-| `--interval 60` | Heartbeat and safety-resync period in seconds. Default `60`. |
-| `--wait-op 5m` | How long to wait for a running sync before giving up. Default `5m`. |
-| `--dry-run` | Print the plan and stop. Nothing is changed. |
-| `--detach` | Run the holder in the background after you confirm. |
-| `--yes` | Skip the confirmation prompt. |
-| `--allow-sensitive` | Allow the denylisted apps. |
-
-Exactly one of `--patch`, `--patch-file`, `-f`, and `--freeze` is required.
-
-### `release`
-
-`release` signals a live holder and waits for it to revert. If the holder is gone, `release`
-reverts from the state file. A field that someone else changed during the hold is skipped
-with a warning; `--force` overwrites it. Releasing a freeze prints a `NOTICE:` line first:
-auto-sync comes back on and every pending change syncs at once.
-
-### Environment
-
-| Variable | Default | Effect |
+| Component | Tested | How |
 |---|---|---|
-| `ARGO_HOLD_STATE_DIR` | `$HOME/.local/state/argo-hold` | Where state and log files live |
-| `ARGO_HOLD_KUBECTL` | `kubectl` | The `kubectl` binary to run; the tests point it at a fake |
-| `ARGO_HOLD_DENYLIST_EXTRA` | unset | Comma- or space-separated app names to refuse in addition to the built-in denylist (`argo-cd`, `app-root`, `external-secrets`). `--allow-sensitive` overrides them |
-| `ARGO_HOLD_ONCALL_CHANNEL` | `#on-call` | The on-call channel that `start` names on the `on-call:` line of its plan output. A blank value uses the default. The tool never posts to it |
+| Python | 3.10, 3.11, 3.12, 3.13, 3.14 | CI, every push |
+| Argo CD | v2.12.4 | one k3d run |
+| kubectl (client) | v1.33.9 | one k3d run |
+| k3s (via k3d) | v1.35.5 | one k3d run |
+| Cloud providers, managed Argo CD, other Argo CD versions | not tested | — |
 
-## Agent prompts
+## RBAC
 
-[`docs/agent-prompts.md`](docs/agent-prompts.md) has two prompts that let a coding agent run a
-whole hold cycle: dry-run, on-call notice, apply, observe, release. They need `kubectl` access
-to the context and `argo-hold` on the agent's `PATH`.
+`argo-hold` acts as whoever runs it. It needs `get`/`list`/`watch`/`patch` on the Argo CD
+`Application`, and `get`/`list`/`watch`/`patch` (plus `create`/`delete` for `-f`) on each
+target object. [`docs/rbac.md`](docs/rbac.md) has a minimal Role and `kubectl auth can-i`
+checks. The Role is derived from reading the code and has not been tested against a
+restricted account.
 
 ## Safety
 
@@ -325,29 +309,23 @@ to the context and `argo-hold` on the agent's `PATH`.
   `start` asks for confirmation unless `--yes` is set.
 - One hold per app. A second `start` for the same app is refused.
 - A hold ends on its own after `--ttl` (default 2h).
-- Every live hold is announced in the on-call channel before it starts, and closed out in the
-  same thread after `release`. The `on-call:` line of the plan output names the channel
-  (default `#on-call`; set `ARGO_HOLD_ONCALL_CHANNEL` to change it). Both
-  [agent prompts](docs/agent-prompts.md) require the post. The tool does not post to Slack and does not check that a post
-  exists.
-- `argo-cd`, `app-root`, and `external-secrets` are refused without `--allow-sensitive`, as is any
-  app named in `ARGO_HOLD_DENYLIST_EXTRA`. This includes `--freeze`.
+- `argo-cd`, `app-root`, and `external-secrets` are refused without `--allow-sensitive`, as is
+  any app named in `ARGO_HOLD_DENYLIST_EXTRA`. This includes `--freeze`.
 - Targets of kind `Secret` are refused.
-- Logs, `--dry-run` output, and `status` show paths, operations, and value shapes, never values.
-  The state file (mode 0600) holds the values at the touched paths. Patch bodies appear in
-  the `kubectl` command line while a command runs.
+- Logs, `--dry-run` output, and `status` show paths, operations, and value shapes, never
+  values. The state file (mode 0600) holds the values at the touched paths. Patch bodies
+  appear in the `kubectl` command line while a command runs.
 - Writes use `kubectl patch` or server-side apply with field manager `argo-hold`. The tool
   never runs client-side `kubectl apply` on Argo-managed objects.
-- The tests never touch a production cluster. The unit tests use a fake `kubectl`; the opt-in integration test uses a throwaway local k3d cluster.
+- The tests never touch a production cluster. The unit tests use a fake `kubectl`; the opt-in
+  integration test uses a throwaway local k3d cluster.
 
-## Exit codes
-
-| Code | Meaning |
-|---|---|
-| 0 | Success |
-| 1 | Error or refusal |
-| 2 | Usage error |
-| 3 | Finished with warnings; the state file is kept (`release --force` finishes the job), or `status` found a dead or stale holder |
+**About the on-call notice:** announcing a hold in an on-call channel is a *team convention*,
+not something the tool does or checks. `argo-hold` only prints the channel name on the
+`on-call:` line of its plan, from `ARGO_HOLD_ONCALL_CHANNEL` (default `#on-call`); it never
+posts to Slack and never verifies that a post exists. The notice is optional from the tool's
+point of view — adopt it if your team wants it. The [agent prompts](docs/agent-prompts.md)
+include the post as a step because they are written for teams that require it.
 
 ## Tests
 
@@ -356,13 +334,17 @@ make test       # pytest suite on a fake kubectl; no cluster needed
 make test-k3d   # opt-in: throwaway local k3d with Argo CD; needs docker, k3d, network
 ```
 
+## More
+
+- [`docs/README.md`](docs/README.md): documentation index.
+- [`docs/how-it-works.md`](docs/how-it-works.md): start sequence, the holder, the revert,
+  failure modes, and what is unverified.
+- [`docs/rbac.md`](docs/rbac.md): minimal Role and access checks.
+- [`docs/agent-prompts.md`](docs/agent-prompts.md): prompts that let a coding agent run a
+  whole hold cycle.
+- [`docs/k3d-findings.md`](docs/k3d-findings.md): what the k3d runs observed.
+- [`CHANGELOG.md`](CHANGELOG.md) and [`RELEASING.md`](RELEASING.md).
+
 ## License
 
 [MIT](LICENSE).
-
-## More
-
-- [`docs/agent-prompts.md`](docs/agent-prompts.md): prompts that let an agent run a hold.
-- [`docs/how-it-works.md`](docs/how-it-works.md): start sequence, the holder, the revert,
-  failure modes, and what is unverified.
-- [`docs/k3d-findings.md`](docs/k3d-findings.md): what the k3d runs observed.

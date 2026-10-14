@@ -61,3 +61,12 @@ from the release tarball, so its `url` and `sha256` change on every release.
 
 Enable the README Homebrew install line (it is held in an HTML comment until the first
 release is published) and confirm the release badge on the README shows the new version.
+
+## Manual, one-time repo settings
+
+These cannot be set through the GitHub API and must be done once in the web UI:
+
+- **Social preview image:** GitHub **Settings -> General -> Social preview**. Upload a PNG
+  (recommended 1280x640). Not faked or scripted here.
+- **Publish the demo GIF:** run `make demo` (needs `vhs`), commit `demo/demo.gif`, and
+  uncomment the image line near the top of `README.md`.

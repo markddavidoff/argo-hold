@@ -43,7 +43,7 @@ Stop where the steps say to stop.
 
 ## Values
 Wherever a command or step below shows <NAME>, use the value of NAME from this list.
-CONTEXT = gke_my-project_us-west1_my-cluster
+CONTEXT = prod-west1
 APP = otel-collector
 TARGET = daemonset/otel-collector-logs
 NS = monitoring
